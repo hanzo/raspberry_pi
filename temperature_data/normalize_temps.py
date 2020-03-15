@@ -2,19 +2,30 @@ from collections import defaultdict
 import csv
 from datetime import datetime
 import dateutil.parser
-import json
+from json import dumps
 import pytz
+import statistics
 
 
 PACIFIC_TZ = pytz.timezone("US/Pacific")
 
+HABITABLE_HEAT_HOURS = frozenset([5, 6, 7, 8, 9, 10, 11, 15, 16, 17, 18, 19, 20])
+# Return true if the given hour is within the hours for which the SF Heat Ordinance requires
+# a minimum temperature of 68°F must be achievable:
+# "Heat capable of maintaining a room temperature of 68°F shall be made available to each occupied
+# habitable room for 13 hours each day between 5:00 a.m. and 11:00 a.m. and 3:00 p.m. to 10:00 p.m"
+# https://sfdbi.org/ftp/uploadedfiles/dbi/Key_Information/19HeatOrdinance0506.pdf
+def is_heat_required(hour_str: str) -> bool:
+    return int(hour_str) in HABITABLE_HEAT_HOURS
+
+
 # Convert the given UTC datetime to Pacific Time (PST or PDT depending on DST)
-def convert_utc_to_pt(utc_dt):
+def convert_utc_to_pt(utc_dt: datetime) -> datetime:
     pst_dt = utc_dt.replace(tzinfo=pytz.utc).astimezone(PACIFIC_TZ)
     return PACIFIC_TZ.normalize(pst_dt)
 
 
-def load_indoor_temps(filename):
+def load_indoor_temps(filename: str) -> list:
     indoor_temps = []
     with open(filename) as indoor_file:
         temp_reader = csv.reader(indoor_file)
@@ -32,7 +43,7 @@ def load_indoor_temps(filename):
     return indoor_temps
 
 
-def load_outdoor_temps(filename):
+def load_outdoor_temps(filename: str) -> list:
     outdoor_temps = []
     with open(filename) as outdoor_file:
         temp_reader = csv.reader(outdoor_file)
@@ -49,7 +60,7 @@ def load_outdoor_temps(filename):
     return outdoor_temps
 
 
-def get_temps_per_hour(temp_list):
+def get_temps_per_hour(temp_list: list) -> defaultdict:
     temps_per_hour = defaultdict(list)
 
     for temp_pair in temp_list:
@@ -68,6 +79,12 @@ def get_temps_per_hour(temp_list):
     return temps_per_hour
 
 
+def avg_temp_per_hour(temps_per_hour):
+    for hour, temps in temps_per_hour.items():
+        avg = statistics.mean(temps)
+        print(f"{hour}: {avg}, {temps}")
+
+
 def main():
     outdoor_temps = load_outdoor_temps("outdoor_temp_readings/sample.csv")
     indoor_temps = load_indoor_temps("indoor_temp_readings/sample.csv")
@@ -76,10 +93,12 @@ def main():
     # print(outdoor_temps)
 
     indoor_temps_per_hour = get_temps_per_hour(indoor_temps)
-    print(json.dumps(indoor_temps_per_hour, indent=2))
+    # print(json.dumps(indoor_temps_per_hour, indent=2))
 
     outdoor_temps_per_hour = get_temps_per_hour(outdoor_temps)
-    print(json.dumps(outdoor_temps_per_hour, indent=2))
+    # print(json.dumps(outdoor_temps_per_hour, indent=2))
+
+    avg_temp_per_hour(indoor_temps_per_hour)
 
 
 if __name__ == "__main__":
