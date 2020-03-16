@@ -14,6 +14,7 @@ class HourStats:
     indoor_temps: list = field(default_factory=list)
     outdoor_temps: list = field(default_factory=list)
     avg_indoor_temp: float = 0
+    max_indoor_temp: float = 0
     avg_outdoor_temp: float = 0
     is_habitable_hour: bool = False
 
@@ -23,20 +24,31 @@ class HourStats:
 class DateStats:
     hours: defaultdict = field(default_factory=lambda: defaultdict(HourStats))
     avg_indoor_temp: float = 0
+    max_indoor_temp: int = 0
     avg_outdoor_temp: float = 0
-    is_habitable_hour: bool = False
+    adequate_hour_count: int = 0
+    inadequate_hour_count: int = 0
+    majority_adequate: bool = True
 
 
 PACIFIC_TZ = pytz.timezone("US/Pacific")
 
-HABITABLE_HEAT_HOURS = frozenset([5, 6, 7, 8, 9, 10, 11, 15, 16, 17, 18, 19, 20])
-# Return true if the given hour is within the hours for which the SF Heat Ordinance requires
-# a minimum temperature of 68°F must be achievable:
 # "Heat capable of maintaining a room temperature of 68°F shall be made available to each occupied
 # habitable room for 13 hours each day between 5:00 a.m. and 11:00 a.m. and 3:00 p.m. to 10:00 p.m"
 # https://sfdbi.org/ftp/uploadedfiles/dbi/Key_Information/19HeatOrdinance0506.pdf
+HABITABLE_TEMP = 68
+HABITABLE_HEAT_HOURS = frozenset([5, 6, 7, 8, 9, 10, 11, 15, 16, 17, 18, 19, 20])
+
+# Return true if the given hour is within the hours for which the SF Heat Ordinance requires
+# a minimum temperature of 68°F must be achievable
 def is_heat_required(hour: int) -> bool:
     return hour in HABITABLE_HEAT_HOURS
+
+
+# Return true if the given temperature meets the minimum habitable temperature
+# required by the SF Heat Ordinance
+def is_habitable_temp(temp: int) -> bool:
+    return temp >= HABITABLE_TEMP
 
 
 # Convert the given UTC datetime to Pacific Time (PST or PDT depending on DST)
@@ -88,25 +100,44 @@ def main():
 
     load_indoor_temps(temps_per_day, "indoor_temp_readings/sample.csv")
     load_outdoor_temps(temps_per_day, "outdoor_temp_readings/sample.csv")
-    # load_indoor_temps(temps_per_hour, "indoor_temp_readings/2020-01-12_2020-02-13.csv")
-    # load_outdoor_temps(
-    #     temps_per_hour, "outdoor_temp_readings/2020-01-12_2020-02-13.csv"
-    # )
+    # load_indoor_temps(temps_per_day, "indoor_temp_readings/2020-01-12_2020-02-13.csv")
+    # load_outdoor_temps(temps_per_day, "outdoor_temp_readings/2020-01-12_2020-02-13.csv")
 
-    for day, date_stats in sorted(temps_per_day.items()):
+    for date, date_stats in sorted(temps_per_day.items()):
+        daily_max_indoor_temp = 0
         for hour, hour_stats in sorted(date_stats.hours.items()):
             # calculate average hourly temperatures
             if hour_stats.indoor_temps:
                 hour_stats.avg_indoor_temp = round(
                     statistics.mean(hour_stats.indoor_temps), 2
                 )
+                hour_stats.max_indoor_temp = round(max(hour_stats.indoor_temps), 2)
+                daily_max_indoor_temp = max(
+                    daily_max_indoor_temp, hour_stats.max_indoor_temp
+                )
+            else:
+                continue
             if hour_stats.outdoor_temps:
                 hour_stats.avg_outdoor_temp = round(
                     statistics.mean(hour_stats.outdoor_temps), 2
                 )
             hour_stats.is_habitable_hour = is_heat_required(int(hour))
+            if hour_stats.is_habitable_hour:
+                if is_habitable_temp(hour_stats.avg_indoor_temp):
+                    date_stats.adequate_hour_count += 1
+                else:
+                    date_stats.inadequate_hour_count += 1
 
-            print(f"{day} {hour}: {hour_stats}")
+            # print(f"{date} {hour}: {hour_stats}")
+
+        date_stats.max_indoor_temp = daily_max_indoor_temp
+        date_stats.majority_adequate = (
+            date_stats.adequate_hour_count >= date_stats.inadequate_hour_count
+        )
+        # print(f"{date}: {date_stats}")
+        print(
+            f"{date}: {date_stats.majority_adequate}, {date_stats.adequate_hour_count}, {date_stats.inadequate_hour_count}, {date_stats.max_indoor_temp}"
+        )
 
 
 if __name__ == "__main__":
