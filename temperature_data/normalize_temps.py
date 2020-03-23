@@ -39,6 +39,10 @@ PACIFIC_TZ = pytz.timezone("US/Pacific")
 HABITABLE_TEMP = 68
 HABITABLE_HEAT_HOURS = frozenset([5, 6, 7, 8, 9, 10, 11, 15, 16, 17, 18, 19, 20])
 
+# Average difference between indoor and outdoor temperature. Calculated as 7.34 in google sheets.
+# TODO: calculate this number within this script
+INDOOR_OUTDOOR_DELTA = 10
+
 # Return true if the given hour is within the hours for which the SF Heat Ordinance requires
 # a minimum temperature of 68°F must be achievable
 def is_heat_required(hour: int) -> bool:
@@ -95,38 +99,55 @@ def load_outdoor_temps(daily_dict: defaultdict(DateStats), filename: str) -> Non
                 daily_dict[pt_dt.date()].hours[hour_str].outdoor_temps.append(temp)
 
 
-def main():
+def calculate_temp_data(extrapolate_data=True):
     temps_per_day = defaultdict(DateStats)
 
-    load_indoor_temps(temps_per_day, "indoor_temp_readings/sample.csv")
-    load_outdoor_temps(temps_per_day, "outdoor_temp_readings/sample.csv")
+    total_adequate_hours = 0
+    total_inadequate_hours = 0
+
+    # load_indoor_temps(temps_per_day, "indoor_temp_readings/sample.csv")
+    # load_outdoor_temps(temps_per_day, "outdoor_temp_readings/sample.csv")
     # load_indoor_temps(temps_per_day, "indoor_temp_readings/2020-01-12_2020-02-13.csv")
     # load_outdoor_temps(temps_per_day, "outdoor_temp_readings/2020-01-12_2020-02-13.csv")
+    load_indoor_temps(temps_per_day, "indoor_temp_readings/2020-01-12_2020-03-10.csv")
+    load_outdoor_temps(temps_per_day, "outdoor_temp_readings/2019-03-10_2020-03-10.csv")
 
     for date, date_stats in sorted(temps_per_day.items()):
         daily_max_indoor_temp = 0
         for hour, hour_stats in sorted(date_stats.hours.items()):
             # calculate average hourly temperatures
-            if hour_stats.indoor_temps:
-                hour_stats.avg_indoor_temp = round(
-                    statistics.mean(hour_stats.indoor_temps), 2
-                )
-                hour_stats.max_indoor_temp = round(max(hour_stats.indoor_temps), 2)
-                daily_max_indoor_temp = max(
-                    daily_max_indoor_temp, hour_stats.max_indoor_temp
-                )
-            else:
-                continue
             if hour_stats.outdoor_temps:
                 hour_stats.avg_outdoor_temp = round(
                     statistics.mean(hour_stats.outdoor_temps), 2
                 )
+                if hour_stats.indoor_temps:
+                    hour_stats.avg_indoor_temp = round(
+                        statistics.mean(hour_stats.indoor_temps), 2
+                    )
+                    hour_stats.max_indoor_temp = round(max(hour_stats.indoor_temps), 2)
+                    daily_max_indoor_temp = max(
+                        daily_max_indoor_temp, hour_stats.max_indoor_temp
+                    )
+                elif extrapolate_data:
+                    # If we have outdoor data but no indoor data, estimate the avg indoor temperature
+                    hour_stats.avg_indoor_temp = (
+                        hour_stats.avg_outdoor_temp + INDOOR_OUTDOOR_DELTA
+                    )
+                    daily_max_indoor_temp = max(
+                        daily_max_indoor_temp, hour_stats.avg_indoor_temp
+                    )
+                else:
+                    print(f"no indoor temperature data for {date} {hour}, skipping")
+                    continue
+
             hour_stats.is_habitable_hour = is_heat_required(int(hour))
             if hour_stats.is_habitable_hour:
                 if is_habitable_temp(hour_stats.avg_indoor_temp):
                     date_stats.adequate_hour_count += 1
+                    total_adequate_hours += 1
                 else:
                     date_stats.inadequate_hour_count += 1
+                    total_inadequate_hours += 1
 
             # print(f"{date} {hour}: {hour_stats}")
 
@@ -139,6 +160,11 @@ def main():
             f"{date}: {date_stats.majority_adequate}, {date_stats.adequate_hour_count}, {date_stats.inadequate_hour_count}, {date_stats.max_indoor_temp}"
         )
 
+    total_habitable_hours = total_adequate_hours + total_inadequate_hours
+    print(
+        f"assuming that the indoor temp was {INDOOR_OUTDOOR_DELTA} degrees warmer than outside, {total_inadequate_hours}/{total_habitable_hours} ({round(100*total_inadequate_hours/total_habitable_hours, 2)}%) of habitable hours were below {HABITABLE_TEMP} degrees"
+    )
+
 
 if __name__ == "__main__":
-    main()
+    calculate_temp_data()
